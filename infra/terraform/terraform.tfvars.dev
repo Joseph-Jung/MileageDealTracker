@@ -1,0 +1,23 @@
+# Development Environment Variables
+# Copy this file to terraform.tfvars and update values
+
+environment         = "dev"
+location            = "East US"
+resource_group_name = "mileage-deal-rg-dev"
+app_name            = "mileage-deal-tracker"
+db_name             = "mileage_tracker_dev"
+db_admin_username   = "dbadmin"
+
+# Storage and compute sizing for dev
+db_storage_mb    = 32768  # 32 GB
+db_sku_name      = "B_Standard_B1ms"
+app_service_sku  = "B1"
+
+# Optional: Add your IP address for direct database access
+# allowed_ip_address = "1.2.3.4"
+
+tags = {
+  Environment = "Development"
+  CostCenter  = "Engineering"
+  Project     = "MileageDealTracker"
+}

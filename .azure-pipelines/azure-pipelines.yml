@@ -1,0 +1,128 @@
+trigger:
+  branches:
+    include:
+      - main
+      - dev
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  NODE_VERSION: '18.x'
+  DATABASE_URL: $(DATABASE_URL)
+  PNPM_VERSION: '8.10.0'
+
+stages:
+  - stage: Build
+    displayName: 'Build and Test'
+    jobs:
+      - job: BuildJob
+        displayName: 'Build Application'
+        steps:
+          - checkout: self
+
+          - task: NodeTool@0
+            inputs:
+              versionSpec: $(NODE_VERSION)
+            displayName: 'Install Node.js'
+
+          - script: |
+              npm install -g pnpm@$(PNPM_VERSION)
+              pnpm --version
+            displayName: 'Install pnpm'
+
+          - script: |
+              cd apps/web
+              pnpm install --frozen-lockfile
+            displayName: 'Install dependencies'
+
+          - script: |
+              cd apps/web
+              npx prisma generate
+            displayName: 'Generate Prisma Client'
+
+          - script: |
+              cd apps/web
+              pnpm run build
+            displayName: 'Build Next.js application'
+
+          - task: ArchiveFiles@2
+            inputs:
+              rootFolderOrFile: 'apps/web'
+              includeRootFolder: false
+              archiveType: 'zip'
+              archiveFile: '$(Build.ArtifactStagingDirectory)/mileage-tracker-web.zip'
+            displayName: 'Package application'
+
+          - publish: '$(Build.ArtifactStagingDirectory)/mileage-tracker-web.zip'
+            artifact: drop
+            displayName: 'Publish build artifact'
+
+  - stage: DeployDev
+    displayName: 'Deploy to Dev'
+    dependsOn: Build
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/dev'))
+    jobs:
+      - deployment: DeployDevJob
+        displayName: 'Deploy to Development'
+        environment: 'development'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: AzureWebApp@1
+                  inputs:
+                    azureSubscription: 'Azure-Service-Connection'
+                    appName: 'mileage-deal-tracker-dev'
+                    package: '$(Pipeline.Workspace)/drop/mileage-tracker-web.zip'
+                    appSettings: |
+                      -DATABASE_URL "$(DEV_DATABASE_URL)"
+                      -NEXT_PUBLIC_APP_URL "$(DEV_APP_URL)"
+                      -NODE_ENV "development"
+                  displayName: 'Deploy to Azure Web App (Dev)'
+
+                - script: |
+                    az webapp deployment list-publishing-profiles --name mileage-deal-tracker-dev --resource-group mileage-deal-rg-dev
+                  displayName: 'Verify deployment'
+
+  - stage: DeployProd
+    displayName: 'Deploy to Production'
+    dependsOn: Build
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - deployment: DeployProdJob
+        displayName: 'Deploy to Production'
+        environment: 'production'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: AzureWebApp@1
+                  inputs:
+                    azureSubscription: 'Azure-Service-Connection'
+                    appName: 'mileage-deal-tracker'
+                    package: '$(Pipeline.Workspace)/drop/mileage-tracker-web.zip'
+                    appSettings: |
+                      -DATABASE_URL "$(PROD_DATABASE_URL)"
+                      -NEXT_PUBLIC_APP_URL "$(PROD_APP_URL)"
+                      -NODE_ENV "production"
+                  displayName: 'Deploy to Azure Web App (Production)'
+
+                - script: |
+                    az webapp deployment list-publishing-profiles --name mileage-deal-tracker --resource-group mileage-deal-rg
+                  displayName: 'Verify deployment'
+
+  - stage: DatabaseMigration
+    displayName: 'Run Database Migrations'
+    dependsOn: DeployProd
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - job: MigrationJob
+        displayName: 'Apply Prisma Migrations'
+        steps:
+          - script: |
+              cd apps/web
+              npx prisma migrate deploy
+            displayName: 'Run Prisma migrations'
+            env:
+              DATABASE_URL: $(PROD_DATABASE_URL)
