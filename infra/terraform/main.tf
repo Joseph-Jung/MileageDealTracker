@@ -52,10 +52,6 @@ resource "azurerm_postgresql_flexible_server" "db" {
   backup_retention_days        = 7
   geo_redundant_backup_enabled = false
 
-  high_availability {
-    mode = "Disabled"
-  }
-
   tags = {
     Environment = var.environment
     Project     = "MileageDealTracker"
