@@ -1,5 +1,5 @@
 import { prisma } from '../client';
-import type { Offer, OfferStatus, Prisma } from '@prisma/client';
+import type { OfferStatus, Prisma } from '@prisma/client';
 
 export interface OfferFilters {
   issuerSlug?: string;
