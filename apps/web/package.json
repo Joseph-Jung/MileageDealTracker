@@ -16,7 +16,7 @@
   },
   "prisma": {
     "seed": "node prisma-lib/seed.js",
-    "schema": "prisma-lib/schema.prisma"
+    "schema": "prisma/schema.prisma"
   },
   "dependencies": {
     "next": "^14.0.4",
