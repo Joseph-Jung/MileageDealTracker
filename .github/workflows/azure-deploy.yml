@@ -67,9 +67,9 @@ jobs:
         # Go back to web directory
         cd ..
 
-        # Create zip file
+        # Create zip file (include node_modules)
         cd deploy
-        zip -r ../deployment.zip . -x "*.git*" -x "node_modules/@types/*"
+        zip -r ../deployment.zip . -x "*.git*"
 
     - name: Deploy to Azure Web App
       uses: azure/webapps-deploy@v2
