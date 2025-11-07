@@ -23,13 +23,12 @@ jobs:
       uses: actions/setup-node@v4
       with:
         node-version: ${{ env.NODE_VERSION }}
-        cache: 'npm'
 
     - name: Install dependencies
       run: |
-        npm ci
+        npm install
         cd apps/web
-        npm ci
+        npm install
 
     - name: Generate Prisma Client
       run: |
@@ -66,7 +65,7 @@ jobs:
 
         # Create a minimal node_modules with only production dependencies
         cd deploy
-        npm ci --omit=dev
+        npm install --omit=dev
 
         # Go back to web directory
         cd ..
