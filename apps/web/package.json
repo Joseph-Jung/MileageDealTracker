@@ -15,7 +15,8 @@
     "postinstall": "prisma generate"
   },
   "prisma": {
-    "seed": "node prisma-lib/seed.js"
+    "seed": "node prisma-lib/seed.js",
+    "schema": "prisma-lib/schema.prisma"
   },
   "dependencies": {
     "next": "^14.0.4",
