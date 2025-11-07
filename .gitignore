@@ -70,3 +70,9 @@ dev.db
 **/terraform.tfvars
 **/.terraformrc
 **/terraform.rc
+
+# Deployment credentials and secrets
+.github/SETUP_SECRETS.md
+azure-terraform-creds.sh
+*.zip
+deployment/

@@ -1,0 +1,101 @@
+name: Deploy to Azure App Service
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  AZURE_WEBAPP_NAME: mileage-deal-tracker-dev
+  AZURE_WEBAPP_PACKAGE_PATH: './apps/web'
+  NODE_VERSION: '18.x'
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: |
+        npm ci
+        cd apps/web
+        npm ci
+
+    - name: Generate Prisma Client
+      run: |
+        cd apps/web
+        npx prisma generate
+      env:
+        DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+    - name: Build Next.js application
+      run: |
+        cd apps/web
+        npm run build
+      env:
+        DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        NEXT_PUBLIC_APP_URL: https://mileage-deal-tracker-dev.azurewebsites.net
+
+    - name: Prepare deployment package
+      run: |
+        cd apps/web
+        # Create a clean deployment directory
+        mkdir -p deploy
+
+        # Copy necessary files
+        cp -r .next deploy/
+        cp -r public deploy/ 2>/dev/null || true
+        cp package*.json deploy/
+        cp next.config.js deploy/
+
+        # Copy Prisma files
+        mkdir -p deploy/node_modules/.prisma
+        mkdir -p deploy/node_modules/@prisma
+        cp -r node_modules/.prisma deploy/node_modules/
+        cp -r node_modules/@prisma deploy/node_modules/
+
+        # Create a minimal node_modules with only production dependencies
+        cd deploy
+        npm ci --omit=dev
+
+        # Go back to web directory
+        cd ..
+
+        # Create zip file
+        cd deploy
+        zip -r ../deployment.zip . -x "*.git*" -x "node_modules/@types/*"
+
+    - name: Deploy to Azure Web App
+      uses: azure/webapps-deploy@v2
+      with:
+        app-name: ${{ env.AZURE_WEBAPP_NAME }}
+        publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+        package: ${{ env.AZURE_WEBAPP_PACKAGE_PATH }}/deployment.zip
+
+    - name: Check deployment status
+      run: |
+        echo "Deployment completed!"
+        echo "Application URL: https://${{ env.AZURE_WEBAPP_NAME }}.azurewebsites.net"
+        echo "Waiting 30 seconds for application to start..."
+        sleep 30
+
+    - name: Health check
+      run: |
+        response=$(curl -s -o /dev/null -w "%{http_code}" https://${{ env.AZURE_WEBAPP_NAME }}.azurewebsites.net/api/health || echo "000")
+        echo "Health check response: $response"
+        if [ "$response" = "200" ]; then
+          echo "✅ Application is healthy!"
+        else
+          echo "⚠️  Application returned status code: $response"
+          echo "Check Azure Portal logs for details"
+        fi
