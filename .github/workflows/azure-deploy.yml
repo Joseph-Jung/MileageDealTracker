@@ -67,9 +67,8 @@ jobs:
         cp -r node_modules/@prisma deploy/node_modules/
 
         # Create a minimal node_modules with only production dependencies
-        # Skip postinstall to avoid regenerating Prisma client (already copied)
         cd deploy
-        npm install --omit=dev --ignore-scripts
+        npm install --omit=dev
 
         # Go back to web directory
         cd ..
