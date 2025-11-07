@@ -54,6 +54,7 @@ jobs:
         # Copy necessary files
         cp -r .next deploy/
         cp -r public deploy/ 2>/dev/null || true
+        cp -r prisma-lib deploy/
         cp package*.json deploy/
         cp next.config.js deploy/
 
@@ -64,8 +65,9 @@ jobs:
         cp -r node_modules/@prisma deploy/node_modules/
 
         # Create a minimal node_modules with only production dependencies
+        # Skip postinstall to avoid regenerating Prisma client (already copied)
         cd deploy
-        npm install --omit=dev
+        npm install --omit=dev --ignore-scripts
 
         # Go back to web directory
         cd ..
