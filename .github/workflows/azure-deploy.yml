@@ -53,6 +53,7 @@ jobs:
 
         # Copy necessary files
         cp -r .next deploy/
+        cp -r src deploy/
         cp -r public deploy/ 2>/dev/null || true
         cp -r prisma deploy/
         cp -r prisma-lib deploy/
