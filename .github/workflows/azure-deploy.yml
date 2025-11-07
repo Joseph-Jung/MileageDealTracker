@@ -51,7 +51,7 @@ jobs:
         # Create a clean deployment directory
         mkdir -p deploy
 
-        # Copy necessary files
+        # Copy necessary files for Azure Oryx to build
         cp -r .next deploy/
         cp -r src deploy/
         cp -r public deploy/ 2>/dev/null || true
@@ -60,16 +60,9 @@ jobs:
         cp package*.json deploy/
         cp next.config.js deploy/
 
-        # Install production dependencies (let Azure's Oryx handle module packaging)
+        # Create zip file (NO node_modules - let Azure Oryx build it)
         cd deploy
-        npm install --production
-
-        # Go back to web directory
-        cd ..
-
-        # Create zip file (include node_modules)
-        cd deploy
-        zip -r ../deployment.zip . -x "*.git*"
+        zip -r ../deployment.zip . -x "*.git*" -x "node_modules/*"
 
     - name: Deploy to Azure Web App
       uses: azure/webapps-deploy@v2
