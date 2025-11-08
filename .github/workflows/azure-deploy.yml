@@ -45,14 +45,20 @@ jobs:
         DATABASE_URL: ${{ secrets.DATABASE_URL }}
         NEXT_PUBLIC_APP_URL: https://mileage-deal-tracker-dev.azurewebsites.net
 
+    - name: Install production dependencies
+      run: |
+        cd apps/web
+        npm install --omit=dev
+
     - name: Prepare deployment package
       run: |
         cd apps/web
         # Create a clean deployment directory
         mkdir -p deploy
 
-        # Copy necessary files for Azure Oryx to build
+        # Copy pre-built application with all dependencies
         cp -r .next deploy/
+        cp -r node_modules deploy/
         cp -r src deploy/
         cp -r public deploy/ 2>/dev/null || true
         cp -r prisma deploy/
@@ -60,9 +66,9 @@ jobs:
         cp package*.json deploy/
         cp next.config.js deploy/
 
-        # Create zip file (NO node_modules - let Azure Oryx build it)
+        # Create zip file with everything pre-built
         cd deploy
-        zip -r ../deployment.zip . -x "*.git*" -x "node_modules/*"
+        zip -r ../deployment.zip . -x "*.git*"
 
     - name: Deploy to Azure Web App
       uses: azure/webapps-deploy@v2
