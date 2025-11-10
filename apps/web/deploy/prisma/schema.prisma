@@ -1,0 +1,247 @@
+// This is your Prisma schema file
+// Learn more: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// CORE MODELS
+// ============================================================================
+
+model Issuer {
+  id        String        @id @default(cuid())
+  name      String        @unique
+  slug      String        @unique
+  website   String
+  logoUrl   String?
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  products  CardProduct[]
+
+  @@map("issuers")
+}
+
+model CardProduct {
+  id           String   @id @default(cuid())
+  issuerId     String
+  name         String
+  slug         String   @unique
+  network      Network
+  type         CardType
+  currency     String // e.g., "AA miles", "UR", "MR"
+  currencyCode String // e.g., "AA", "UR", "MR" for lookups
+  imageUrl     String?
+  description  String?  @db.Text
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  issuer Issuer  @relation(fields: [issuerId], references: [id], onDelete: Cascade)
+  offers Offer[]
+
+  @@index([issuerId])
+  @@index([currencyCode])
+  @@map("card_products")
+}
+
+model Offer {
+  id                   String          @id @default(cuid())
+  productId            String
+  headline             String
+  bonusPoints          Int
+  minSpendAmount       Decimal         @db.Decimal(10, 2)
+  minSpendWindowDays   Int
+  annualFee            Decimal         @db.Decimal(10, 2)
+  firstYearWaived      Boolean         @default(false)
+  statementCredits     Decimal         @db.Decimal(10, 2) @default(0)
+  introAprMonths       Int?
+  expiresOn            DateTime?
+  landingUrl           String
+  affiliateUrl         String?
+  sourceType           SourceType
+  geo                  String          @default("US")
+  status               OfferStatus
+  termsSnapshotMeta    Json? // {hash, s3Path, capturedAt}
+  lastVerifiedAt       DateTime
+  publishedAt          DateTime?
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+
+  product   CardProduct     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  snapshots OfferSnapshot[]
+
+  @@index([productId])
+  @@index([status])
+  @@index([lastVerifiedAt])
+  @@map("offers")
+}
+
+model OfferSnapshot {
+  id                 String    @id @default(cuid())
+  offerId            String
+  capturedAt         DateTime  @default(now())
+  bonusPoints        Int
+  minSpendAmount     Decimal   @db.Decimal(10, 2)
+  minSpendWindowDays Int
+  annualFee          Decimal   @db.Decimal(10, 2)
+  statementCredits   Decimal   @db.Decimal(10, 2)
+  expiresOn          DateTime?
+  landingUrl         String
+  diffSummary        String?   @db.Text
+
+  offer Offer @relation(fields: [offerId], references: [id], onDelete: Cascade)
+
+  @@index([offerId, capturedAt])
+  @@index([capturedAt])
+  @@map("offer_snapshots")
+}
+
+model CurrencyValuation {
+  id            String   @id @default(cuid())
+  currencyCode  String   @unique
+  centsPerPoint Decimal  @db.Decimal(4, 2)
+  effectiveFrom DateTime @default(now())
+  notes         String?  @db.Text
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([currencyCode])
+  @@map("currency_valuations")
+}
+
+// ============================================================================
+// EMAIL & SUBSCRIPTION MODELS
+// ============================================================================
+
+model Subscriber {
+  id                String                 @id @default(cuid())
+  email             String                 @unique
+  emailVerified     Boolean                @default(false)
+  verificationToken String?                @unique
+  weeklyDigest      Boolean                @default(true)
+  instantAlerts     Boolean                @default(false)
+  subscribedAt      DateTime               @default(now())
+  unsubscribedAt    DateTime?
+  unsubscribeToken  String                 @unique @default(cuid())
+  preferences       SubscriberPreference[]
+
+  @@index([email])
+  @@index([emailVerified])
+  @@map("subscribers")
+}
+
+model SubscriberPreference {
+  id           String  @id @default(cuid())
+  subscriberId String
+  issuerSlug   String? // null = all issuers
+  currencyCode String? // null = all currencies
+  minBonus     Int? // null = no minimum
+
+  subscriber Subscriber @relation(fields: [subscriberId], references: [id], onDelete: Cascade)
+
+  @@unique([subscriberId, issuerSlug, currencyCode])
+  @@index([subscriberId])
+  @@map("subscriber_preferences")
+}
+
+model EmailLog {
+  id            String      @id @default(cuid())
+  email         String
+  subject       String
+  type          EmailType
+  status        EmailStatus
+  sentAt        DateTime?
+  failureReason String?
+  createdAt     DateTime    @default(now())
+
+  @@index([email, createdAt])
+  @@index([status])
+  @@map("email_logs")
+}
+
+// ============================================================================
+// ADMIN & AUDIT MODELS
+// ============================================================================
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  role      UserRole
+  authId    String?  @unique // Clerk/Auth0 ID
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([email])
+  @@index([authId])
+  @@map("users")
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  action     String // e.g., "offer.created", "offer.published"
+  entityType String // e.g., "Offer", "CardProduct"
+  entityId   String
+  changes    Json? // Before/after snapshot
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// ============================================================================
+// ENUMS
+// ============================================================================
+
+enum Network {
+  AMEX
+  VISA
+  MASTERCARD
+  DISCOVER
+}
+
+enum CardType {
+  PERSONAL
+  BUSINESS
+}
+
+enum SourceType {
+  PUBLIC
+  REFERRAL
+  IN_BRANCH
+  TARGETED
+}
+
+enum OfferStatus {
+  ACTIVE
+  EXPIRED
+  RUMORED
+  DRAFT
+}
+
+enum EmailType {
+  VERIFICATION
+  WEEKLY_DIGEST
+  INSTANT_ALERT
+}
+
+enum EmailStatus {
+  QUEUED
+  SENT
+  FAILED
+  BOUNCED
+}
+
+enum UserRole {
+  ADMIN
+  EDITOR
+  VIEWER
+}
