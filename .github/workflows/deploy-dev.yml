@@ -1,0 +1,79 @@
+name: Deploy to Development
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: '20.x'
+
+jobs:
+  build-and-deploy:
+    name: Build and Deploy to Dev
+    runs-on: ubuntu-latest
+    environment:
+      name: development
+      url: https://mileage-deal-tracker-dev.azurewebsites.net
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install dependencies
+        working-directory: apps/web
+        run: npm ci
+
+      - name: Generate Prisma Client
+        working-directory: apps/web
+        run: npx prisma generate
+
+      - name: Build Next.js
+        working-directory: apps/web
+        run: npm run build
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - name: Prepare deployment package
+        working-directory: apps/web
+        run: |
+          mkdir -p deploy
+          cp -r src deploy/
+          cp -r public deploy/ 2>/dev/null || true
+          cp -r prisma deploy/
+          cp -r prisma-lib deploy/
+          cp package*.json deploy/
+          cp next.config.js deploy/
+          cp postcss.config.js deploy/
+          cp tailwind.config.js deploy/
+          cd deploy
+          zip -r ../deployment.zip . -x "*.git*" -x "node_modules/*" -x ".next/*"
+
+      - name: Deploy to Azure Web App
+        uses: azure/webapps-deploy@v2
+        with:
+          app-name: mileage-deal-tracker-dev
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          package: apps/web/deployment.zip
+
+      - name: Wait for deployment
+        run: sleep 30
+
+      - name: Health check
+        run: |
+          response=$(curl -s -o /dev/null -w "%{http_code}" https://mileage-deal-tracker-dev.azurewebsites.net/api/health || echo "000")
+          echo "Health check response: $response"
+          if [ "$response" = "200" ]; then
+            echo "✅ Application is healthy!"
+          else
+            echo "⚠️ Application returned status code: $response"
+            echo "Check Azure Portal logs for details"
+          fi

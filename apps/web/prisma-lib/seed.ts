@@ -75,7 +75,8 @@ async function main() {
     },
   });
 
-  const bankOfAmerica = await prisma.issuer.upsert({
+  // Bank of America - reserved for future use
+  await prisma.issuer.upsert({
     where: { slug: 'bank-of-america' },
     update: {},
     create: {
@@ -95,7 +96,8 @@ async function main() {
     },
   });
 
-  const usBank = await prisma.issuer.upsert({
+  // U.S. Bank - reserved for future use
+  await prisma.issuer.upsert({
     where: { slug: 'us-bank' },
     update: {},
     create: {
@@ -152,7 +154,8 @@ async function main() {
     },
   });
 
-  const capOneVenture = await prisma.cardProduct.upsert({
+  // Capital One Venture - reserved for future offers
+  await prisma.cardProduct.upsert({
     where: { slug: 'capital-one-venture' },
     update: {},
     create: {
