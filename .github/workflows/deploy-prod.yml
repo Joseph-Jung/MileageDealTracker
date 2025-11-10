@@ -1,0 +1,226 @@
+name: Deploy to Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: 'Type "DEPLOY" to confirm production deployment'
+        required: true
+        type: string
+
+env:
+  NODE_VERSION: '20.x'
+
+jobs:
+  validate:
+    name: Validate Deployment
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check confirmation
+        run: |
+          if [ "${{ github.event.inputs.confirmation }}" != "DEPLOY" ]; then
+            echo "❌ Deployment cancelled. You must type 'DEPLOY' to confirm."
+            exit 1
+          fi
+          echo "✅ Deployment confirmed"
+
+  build:
+    name: Build Application
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install dependencies
+        working-directory: apps/web
+        run: npm ci
+
+      - name: Generate Prisma Client
+        working-directory: apps/web
+        run: npx prisma generate
+
+      - name: Build Next.js
+        working-directory: apps/web
+        run: npm run build
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL_PROD }}
+
+      - name: Prepare deployment package
+        working-directory: apps/web
+        run: |
+          mkdir -p deploy
+          cp -r .next deploy/
+          cp -r src deploy/
+          cp -r public deploy/ 2>/dev/null || true
+          cp -r prisma deploy/
+          cp -r prisma-lib deploy/
+          cp -r node_modules deploy/
+          cp package*.json deploy/
+          cp next.config.js deploy/
+          cp postcss.config.js deploy/
+          cp tailwind.config.js deploy/
+          cp tsconfig.json deploy/
+          cd deploy
+          zip -r ../deployment.zip . -x "*.git*"
+
+      - name: Upload deployment artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-deployment
+          path: apps/web/deployment.zip
+          retention-days: 1
+
+  deploy-to-staging-slot:
+    name: Deploy to Staging Slot
+    runs-on: ubuntu-latest
+    needs: build
+    environment:
+      name: production-staging
+      url: https://mileage-deal-tracker-prod-staging.azurewebsites.net
+    steps:
+      - name: Download deployment artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: production-deployment
+
+      - name: Deploy to Azure Web App (Staging Slot)
+        uses: azure/webapps-deploy@v2
+        with:
+          app-name: mileage-deal-tracker-prod
+          slot-name: staging
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE_PROD_STAGING }}
+          package: deployment.zip
+
+      - name: Wait for deployment
+        run: sleep 60
+
+      - name: Health check (Staging Slot)
+        run: |
+          echo "Testing staging slot health..."
+          for i in {1..5}; do
+            response=$(curl -s -o /dev/null -w "%{http_code}" https://mileage-deal-tracker-prod-staging.azurewebsites.net/api/health || echo "000")
+            echo "Attempt $i: Status code $response"
+
+            if [ "$response" = "200" ]; then
+              echo "✅ Staging slot is healthy!"
+              curl -s https://mileage-deal-tracker-prod-staging.azurewebsites.net/api/health | python3 -m json.tool || true
+              exit 0
+            fi
+
+            if [ $i -lt 5 ]; then
+              echo "Waiting 30 seconds before retry..."
+              sleep 30
+            fi
+          done
+
+          echo "❌ Staging slot health check failed after 5 attempts"
+          exit 1
+
+  swap-to-production:
+    name: Swap to Production
+    runs-on: ubuntu-latest
+    needs: deploy-to-staging-slot
+    environment:
+      name: production
+      url: https://mileage-deal-tracker-prod.azurewebsites.net
+    steps:
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Swap staging to production
+        run: |
+          echo "🔄 Swapping staging slot to production..."
+          az webapp deployment slot swap \
+            --resource-group mileage-deal-rg-prod \
+            --name mileage-deal-tracker-prod \
+            --slot staging \
+            --target-slot production
+          echo "✅ Slot swap completed"
+
+      - name: Wait for production startup
+        run: sleep 30
+
+      - name: Health check (Production)
+        id: health_check
+        run: |
+          echo "Testing production health..."
+          for i in {1..5}; do
+            response=$(curl -s -o /dev/null -w "%{http_code}" https://mileage-deal-tracker-prod.azurewebsites.net/api/health || echo "000")
+            echo "Attempt $i: Status code $response"
+
+            if [ "$response" = "200" ]; then
+              echo "✅ Production is healthy!"
+              curl -s https://mileage-deal-tracker-prod.azurewebsites.net/api/health | python3 -m json.tool || true
+              echo "failed=false" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+
+            if [ $i -lt 5 ]; then
+              echo "Waiting 30 seconds before retry..."
+              sleep 30
+            fi
+          done
+
+          echo "❌ Production health check failed after 5 attempts"
+          echo "failed=true" >> $GITHUB_OUTPUT
+          exit 1
+
+      - name: Rollback on failure
+        if: failure() && steps.health_check.outputs.failed == 'true'
+        run: |
+          echo "🔙 Rolling back production deployment..."
+          az webapp deployment slot swap \
+            --resource-group mileage-deal-rg-prod \
+            --name mileage-deal-tracker-prod \
+            --slot production \
+            --target-slot staging
+          echo "✅ Rollback completed"
+          exit 1
+
+      - name: Monitor production (5 minutes)
+        if: success()
+        run: |
+          echo "📊 Monitoring production for 5 minutes..."
+          for i in {1..10}; do
+            response=$(curl -s -o /dev/null -w "%{http_code}" https://mileage-deal-tracker-prod.azurewebsites.net/api/health || echo "000")
+            if [ "$response" = "200" ]; then
+              echo "Check $i/10: ✅ Production healthy (Status: $response)"
+            else
+              echo "Check $i/10: ⚠️  Status: $response"
+            fi
+
+            if [ $i -lt 10 ]; then
+              sleep 30
+            fi
+          done
+          echo "✅ Production monitoring completed"
+
+  notify-success:
+    name: Deployment Success
+    runs-on: ubuntu-latest
+    needs: swap-to-production
+    if: success()
+    steps:
+      - name: Deployment summary
+        run: |
+          echo "========================================="
+          echo "✅ PRODUCTION DEPLOYMENT SUCCESSFUL"
+          echo "========================================="
+          echo ""
+          echo "Production URL: https://mileage-deal-tracker-prod.azurewebsites.net"
+          echo "Staging URL: https://mileage-deal-tracker-prod-staging.azurewebsites.net"
+          echo ""
+          echo "Deployed by: ${{ github.actor }}"
+          echo "Commit: ${{ github.sha }}"
+          echo "Branch: ${{ github.ref_name }}"
+          echo ""
